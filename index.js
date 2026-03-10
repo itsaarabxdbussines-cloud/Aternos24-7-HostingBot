@@ -461,7 +461,7 @@ function createBot() {
       port: config.server.port,
       version: botVersion,
       hideErrors: false,
-      checkTimeoutInterval: 300000
+      checkTimeoutInterval: 600000
     });
 
     bot.loadPlugin(pathfinder);
@@ -605,21 +605,41 @@ function scheduleReconnect() {
 function initializeModules(bot, mcData, defaultMove) {
   console.log('[Modules] Initializing all modules...');
 
-  // ---------- AUTO AUTH ----------
+  // ---------- AUTO AUTH (REACTIVE) ----------
   if (config.utils['auto-auth'] && config.utils['auto-auth'].enabled) {
     const password = config.utils['auto-auth'].password;
-    setTimeout(() => {
-      if (bot && botState.connected) {
-        // Try both, but with a small delay between them to avoid spam kicks
+    let authHandled = false;
+
+    const tryAuth = (type) => {
+      if (authHandled || !bot || !botState.connected) return;
+      authHandled = true;
+      if (type === 'register') {
         bot.chat(`/register ${password} ${password}`);
-        setTimeout(() => {
-          if (bot && botState.connected) {
-            bot.chat(`/login ${password}`);
-            console.log('[Auth] Sent login commands');
-          }
-        }, 1500);
+        console.log('[Auth] Detected register prompt - sent /register');
+      } else {
+        bot.chat(`/login ${password}`);
+        console.log('[Auth] Detected login prompt - sent /login');
       }
-    }, 2000);
+    };
+
+    bot.on('messagestr', (message) => {
+      if (authHandled) return;
+      const msg = message.toLowerCase();
+      if (msg.includes('/register') || msg.includes('register ') || msg.includes('지정된 비밀번호')) {
+        tryAuth('register');
+      } else if (msg.includes('/login') || msg.includes('login ') || msg.includes('로그인')) {
+        tryAuth('login');
+      }
+    });
+
+    // Failsafe: if no prompt after 10s, try login anyway
+    setTimeout(() => {
+      if (!authHandled && bot && botState.connected) {
+        console.log('[Auth] No prompt detected after 10s, sending /login as failsafe');
+        bot.chat(`/login ${password}`);
+        authHandled = true;
+      }
+    }, 10000);
   }
 
   // ---------- CHAT MESSAGES ----------
